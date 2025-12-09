@@ -18,7 +18,9 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
@@ -40,6 +42,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.Observer
 import com.example.lightmeter.ui.theme.LightMeterTheme
+import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
 
@@ -194,6 +197,23 @@ fun LightMeterScreen(
 ) {
     val activity = context as? MainActivity
 
+    // ISO 与光圈选项
+    val isoOptions = listOf(25, 50, 80, 100, 200, 400, 500, 800)
+    val apertureOptions = listOf(1.0f, 1.1f, 1.2f, 1.4f, 1.8f, 2.0f, 2.4f, 2.8f, 3.2f, 3.5f, 4.0f, 5.6f, 6.2f, 7.0f, 8.0f)
+
+    var isoIndex by remember { mutableStateOf(3) }        // 默认 ISO 100
+    var apertureIndex by remember { mutableStateOf(7) }   // 默认 F2.8
+
+    val currentIso = isoOptions[isoIndex]
+    val currentAperture = apertureOptions[apertureIndex]
+
+    val brightness = if (useCamera) cameraLight else sensorLight
+    val shutterSeconds = calculateShutterSpeedSeconds(
+        iso = currentIso,
+        aperture = currentAperture,
+        brightness = brightness
+    )
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -216,12 +236,16 @@ fun LightMeterScreen(
 
         Box(
             modifier = Modifier
-                .fillMaxSize()
+                .weight(1f)
+                .fillMaxWidth()
                 .padding(top = 32.dp),
             contentAlignment = Alignment.Center
         ) {
             if (useCamera) {
-                Text(text = "摄像头亮度估计：${"%.2f".format(cameraLight)}")
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(text = "摄像头亮度估计：${"%.2f".format(cameraLight)}")
+                    Text(text = "推荐快门：${formatShutterSpeed(shutterSeconds)}")
+                }
                 LaunchedEffect(useCamera, useFrontCamera) {
                     if (activity?.hasCameraPermission() == true) {
                         activity.startCameraAnalysis(context, useFrontCamera = useFrontCamera)
@@ -230,10 +254,100 @@ fun LightMeterScreen(
                     }
                 }
             } else {
-                Text(text = "环境光亮度：${"%.2f".format(sensorLight)} lx")
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(text = "环境光亮度：${"%.2f".format(sensorLight)} lx")
+                    Text(text = "推荐快门：${formatShutterSpeed(shutterSeconds)}")
+                }
+            }
+        }
+
+        // 底部 ISO / 光圈 选择器
+        Column {
+            Text(
+                text = "ISO：$currentIso",
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            Row(
+                modifier = Modifier.padding(top = 4.dp)
+            ) {
+                Button(
+                    onClick = {
+                        isoIndex = (isoIndex - 1 + isoOptions.size) % isoOptions.size
+                    },
+                    modifier = Modifier.padding(end = 8.dp)
+                ) {
+                    Text(text = "上一档")
+                }
+                Button(
+                    onClick = {
+                        isoIndex = (isoIndex + 1) % isoOptions.size
+                    }
+                ) {
+                    Text(text = "下一档")
+                }
+            }
+
+            Text(
+                text = "光圈：F${"%.1f".format(currentAperture)}",
+                modifier = Modifier.padding(top = 16.dp)
+            )
+            Row(
+                modifier = Modifier.padding(top = 4.dp)
+            ) {
+                Button(
+                    onClick = {
+                        apertureIndex = (apertureIndex - 1 + apertureOptions.size) % apertureOptions.size
+                    },
+                    modifier = Modifier.padding(end = 8.dp)
+                ) {
+                    Text(text = "上一档")
+                }
+                Button(
+                    onClick = {
+                        apertureIndex = (apertureIndex + 1) % apertureOptions.size
+                    }
+                ) {
+                    Text(text = "下一档")
+                }
             }
         }
     }
+}
+
+/**
+ * 根据 ISO、光圈和当前亮度估算快门速度（秒）。
+ * 这里只是一个近似模型，用于演示：亮度越高 / ISO 越大 / 光圈越大，快门越快。
+ */
+fun calculateShutterSpeedSeconds(iso: Int, aperture: Float, brightness: Float): Float {
+    if (brightness <= 0.1f) return 30f // 亮度太低时给一个很慢的快门
+
+    val effectiveBrightness = brightness + 1f
+    val t = (aperture * aperture * 100f) / (iso * effectiveBrightness)
+
+    // 限制在 1/8000s ~ 30s 范围内
+    return t.coerceIn(1f / 8000f, 30f)
+}
+
+/**
+ * 把秒数格式化成类似相机的快门表示，如 1/125s、0.5s 等。
+ */
+fun formatShutterSpeed(seconds: Float): String {
+    if (seconds <= 0f) return "--"
+
+    if (seconds < 1f) {
+        val candidates = listOf(8000, 4000, 2000, 1000, 500, 250, 180, 125, 90, 60, 45, 30, 15, 8, 4, 2, 1)
+        val best = candidates.minByOrNull { denom ->
+            abs(1f / denom - seconds)
+        } ?: 1
+        return "1/$best s"
+    }
+
+    val rounded = if (seconds < 10f) {
+        String.format("%.1f", seconds)
+    } else {
+        seconds.toInt().toString()
+    }
+    return "$rounded s"
 }
 
 @Preview(showBackground = true)
